@@ -1,4 +1,5 @@
 import pandas as pd
+from urllib.error import HTTPError
 from datetime import datetime, timedelta
 from time import sleep
 from PIL import Image, ImageFont, ImageDraw
@@ -28,8 +29,8 @@ def main():
     us_positive_average = int(us['positiveRollingSeven'].iloc[0])
     total_immune = us['positive'].iloc[0] + total_vacc
 
-    ### Set Inky Display Stuff
-    print('initializing inky display')
+    # Set Inky Display stuff
+    print('Initializing inky display')
     display = InkyWHAT(colour='red')
     img = Image.new("P", (display.WIDTH, display.HEIGHT))
     draw = ImageDraw.Draw(img)
@@ -55,12 +56,9 @@ def main():
     draw.line((middle, header_y, middle, display.HEIGHT),
               fill=display.BLACK, width=3)
 
-    ### new deaths
-    # death title
+    # new deaths
     draw.text((get_centered_x('New Deaths', sml_font), y_cursor), 'New Deaths', display.RED, sml_font)
     y_cursor += sml_font.getsize('New Deaths')[1] + 5
-
-    # death numbers
     new_deaths_txt = f"IA: {iowa['deathIncrease'][0]:,d} | US: {us['deathIncrease'][0]:,d}"
     draw.text((get_centered_x(new_deaths_txt, med_font), y_cursor), new_deaths_txt, display.BLACK, med_font)
     y_cursor += med_font.getsize(new_deaths_txt)[1] + extra_y_spacer
@@ -70,12 +68,9 @@ def main():
               rolling_deaths_txt, display.BLACK, rolling_deaths_font)
     y_cursor = header_y + (InkyWHAT.HEIGHT - header_y) / 3 + 3  # reset cursor to beginning of col 1 row 2
 
-    ### new infections
-    # infections title
+    # new infections
     draw.text((get_centered_x('New Infections', sml_font), y_cursor), 'New Infections', display.RED, sml_font)
     y_cursor += sml_font.getsize('New Infections')[1] + 5
-
-    # infection numbers
     new_positive_txt = f"IA: {iowa['positiveIncrease'][0]:,d} | US: {us['positiveIncrease'][0]:,d}"
     new_positive_font = ImageFont.truetype(FredokaOne, max_font_size(new_positive_txt, max_line_length))
     draw.text((get_centered_x(new_positive_txt, new_positive_font), y_cursor), new_positive_txt, display.BLACK,
@@ -87,8 +82,7 @@ def main():
               display.BLACK, rolling_positive_font)
     y_cursor = header_y + 2 * (InkyWHAT.HEIGHT - header_y) / 3 + 3  # reset cursor to beginning of col 1 row 2
 
-    ### positive test rate
-    # positive test rate title
+    # positive test rate
     draw.text((get_centered_x('Positive Test Rate', sml_font), y_cursor), 'Positive Test Rate', display.RED, sml_font)
     y_cursor += sml_font.getsize('Positive Test Rate')[1] + 5
 
@@ -103,7 +97,7 @@ def main():
     draw.text((get_centered_x(rolling_positive_txt, rolling_positive_font), y_cursor), rolling_positive_txt,
               display.BLACK, rolling_positive_font)
 
-    ### % dead
+    # % dead
     y_cursor = header_y + 3
     draw.text((get_centered_x('US Percent Dead', sml_font, 'third'), y_cursor), 'US Percent Dead', display.RED, sml_font)
     y_cursor += sml_font.getsize('US Percent Dead')[1] + 10
@@ -112,16 +106,15 @@ def main():
     draw.text((get_centered_x(death_pct_text, death_pct_font, 'third'), y_cursor), death_pct_text, display.BLACK, death_pct_font)
     y_cursor = header_y + (InkyWHAT.HEIGHT - header_y) / 3 + 3  # reset cursor to beginning of col 1 row 3
 
-
-    ### new immunity
+    # immunity
     draw.text((get_centered_x('US Percent "Immune"', sml_font, 'third'), y_cursor), 'US Percent "Immune"', display.RED, sml_font)
     y_cursor += sml_font.getsize('US Percent "Immune"')[1] + 10
-    immune_text = f'{100 * total_immune / us_pop:.2f}%'
+    immune_text = f'{100 * (total_immune - us["death"].iloc[0]) / us_pop:.2f}%'  # have to subtract dead from immune :(
     immune_font = ImageFont.truetype(FredokaOne, max_font_size(immune_text, max_line_length))
     draw.text((get_centered_x(immune_text, immune_font, 'third'), y_cursor), immune_text, display.BLACK, immune_font)
     y_cursor = header_y + 2 * (InkyWHAT.HEIGHT - header_y) / 3 + 3  # reset cursor to beginning of col 1 row 3
 
-    ### num vaccinated
+    # num vaccinated
     draw.text((get_centered_x('US People Vaccinated', sml_font, 'third'), y_cursor), 'US People Vaccinated', display.RED, sml_font)
     y_cursor += sml_font.getsize('US People Vaccinated')[1] + 3
     total_vacc_txt = f'Total: {int(total_vacc):,d}'
@@ -143,7 +136,10 @@ def main():
 
 
 def get_infection_history(link: str) -> pd.DataFrame:
-    df = pd.read_csv(link)
+    try:
+        df = pd.read_csv(link)
+    except HTTPError:
+        raise ConnectionError(f'Error when pulling infection data with {link}')
     df['date'] = pd.to_datetime(df['date'], format="%Y%m%d")
     df['positiveTestRate'] = df['positiveIncrease'] / (df['positiveIncrease'] + df['negativeIncrease'])
     df['deathRollingSeven'] = df.sort_values('date')['deathIncrease'].rolling(7).mean()
@@ -154,8 +150,10 @@ def get_infection_history(link: str) -> pd.DataFrame:
 
 
 def get_number_vaccinations(link: str):
-    df = pd.read_csv(link)
-    df = df[df['location'] == 'United States']
+    try:
+        df = pd.read_csv(link)
+    except HTTPError:
+        raise ConnectionError(f'Error when pulling vaccination data with {link}')
     df = df.sort_values(by='date', ascending=False)
     df = df.fillna(method='backfill')
     return df['total_vaccinations'].iloc[0], df['total_vaccinations_per_hundred'].iloc[0]

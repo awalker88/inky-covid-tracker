@@ -1,42 +1,193 @@
-# import pandas as pd
-# from datetime import date
-# from dateutil.relativedelta import relativedelta
+import pandas as pd
+from datetime import datetime, timedelta
 from time import sleep
-import speedtest
 from PIL import Image, ImageFont, ImageDraw
 from font_fredoka_one import FredokaOne
 from inky import InkyWHAT
 
 
-while True:
-    # covid stats
-    # today = pd.to_datetime('today')
-    # iowa = pd.read_csv("https://api.covidtracking.com/v1/states/ia/daily.csv")
-    # iowa['date'] = pd.to_datetime(iowa['date'], format="%Y%m%d")
-    # iowa['positive_test_rate'] = iowa['positiveIncrease'] / (iowa['positiveIncrease'] + iowa['negative_increase'])
-    #
-    # last_seven_deaths = iowa[iowa['date'] > (today + relativedelta(days=-7))][['date', 'deathIncrease']]
-    #
-    # # internet
-    st = speedtest.Speedtest()
-    download_mbit = st.download() / 1_000_000
-    upload_mbit = st.upload() / 1_000_000
+def main():
+    first_day = pd.to_datetime('2020-1-20')  # first case in US
 
-    # 7-day rolling average positivity rate
+    iowa_pop = 3_182_025
+    us_pop = 330_746_845
+    print('Pulling infection histories')
+    iowa = get_infection_history("https://api.covidtracking.com/v1/states/ia/daily.csv")
+    us = get_infection_history("https://api.covidtracking.com/v1/us/daily.csv")
+    print('Received infection histories')
 
-    # inky stuff
+    print('Pulling infection histories')
+    total_vacc, vacc_per_hundred = get_number_vaccinations("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/owid-covid-data.csv")
+    print('Received vaccination histories')
 
-    inky_display = InkyWHAT("red")
-    inky_display.set_border(inky_display.WHITE)
-    img = Image.new("P", (inky_display.WIDTH, inky_display.HEIGHT))
+    latest_date = iowa['date'][0]
+
+    iowa_death_average = int(iowa['deathRollingSeven'].iloc[0])
+    us_death_average = int(us['deathRollingSeven'].iloc[0])
+    iowa_positive_average = int(iowa['positiveRollingSeven'].iloc[0])
+    us_positive_average = int(us['positiveRollingSeven'].iloc[0])
+    total_immune = us['positive'].iloc[0] + total_vacc
+
+    ### Set Inky Display Stuff
+    print('initializing inky display')
+    display = InkyWHAT(colour='red')
+    img = Image.new("P", (display.WIDTH, display.HEIGHT))
     draw = ImageDraw.Draw(img)
-    font = ImageFont.truetype(FredokaOne, 36)
-    message = f'D: {download_mbit:.1f} | U: {upload_mbit:.1f}'
-    w, h = font.getsize(message)
-    x = (inky_display.WIDTH / 2) - (w / 2)
-    y = (inky_display.HEIGHT / 2) - (h / 2)
+    lrg_font, med_font, sml_font = ImageFont.truetype(FredokaOne, 26), ImageFont.truetype(FredokaOne, 22), ImageFont.truetype(FredokaOne, 16)
+    left_pad = 3
+    middle = display.WIDTH / 2
+    header_y = 45
+    y_cursor = header_y + 3
+    max_line_length = 190
+    extra_y_spacer = 3
 
-    draw.text((x, y), message, inky_display.BLACK, font)
-    inky_display.set_image(img)
-    inky_display.show()
-    sleep(60)
+    # header and section lines
+    draw.text((left_pad, 5), f" {latest_date.strftime('%b %d')}           Day {(latest_date - first_day).days:,d}"
+                             f" of COVID", display.BLACK, lrg_font)
+    draw.line((left_pad, header_y, display.WIDTH - left_pad, header_y),
+              fill=display.BLACK, width=3)
+    draw.line((left_pad, header_y + (InkyWHAT.HEIGHT - header_y) / 3,
+               display.WIDTH - left_pad, header_y + (InkyWHAT.HEIGHT - header_y) / 3),
+              fill=display.BLACK, width=3)
+    draw.line((left_pad, header_y + 2 * (InkyWHAT.HEIGHT - header_y) / 3,
+               display.WIDTH - left_pad, header_y + 2 * (InkyWHAT.HEIGHT - header_y) / 3),
+              fill=display.BLACK, width=3)
+    draw.line((middle, header_y, middle, display.HEIGHT),
+              fill=display.BLACK, width=3)
+
+    ### new deaths
+    # death title
+    draw.text((get_centered_x('New Deaths', sml_font), y_cursor), 'New Deaths', display.RED, sml_font)
+    y_cursor += sml_font.getsize('New Deaths')[1] + 5
+
+    # death numbers
+    new_deaths_txt = f"IA: {iowa['deathIncrease'][0]:,d} | US: {us['deathIncrease'][0]:,d}"
+    draw.text((get_centered_x(new_deaths_txt, med_font), y_cursor), new_deaths_txt, display.BLACK, med_font)
+    y_cursor += med_font.getsize(new_deaths_txt)[1] + extra_y_spacer
+    rolling_deaths_txt = f"Avg IA: {iowa_death_average:,d} | US: {us_death_average:,d}"
+    rolling_deaths_font = ImageFont.truetype(FredokaOne, max_font_size(rolling_deaths_txt, max_line_length))
+    draw.text((get_centered_x(rolling_deaths_txt, rolling_deaths_font), y_cursor),
+              rolling_deaths_txt, display.BLACK, rolling_deaths_font)
+    y_cursor = header_y + (InkyWHAT.HEIGHT - header_y) / 3 + 3  # reset cursor to beginning of col 1 row 2
+
+    ### new infections
+    # infections title
+    draw.text((get_centered_x('New Infections', sml_font), y_cursor), 'New Infections', display.RED, sml_font)
+    y_cursor += sml_font.getsize('New Infections')[1] + 5
+
+    # infection numbers
+    new_positive_txt = f"IA: {iowa['positiveIncrease'][0]:,d} | US: {us['positiveIncrease'][0]:,d}"
+    new_positive_font = ImageFont.truetype(FredokaOne, max_font_size(new_positive_txt, max_line_length))
+    draw.text((get_centered_x(new_positive_txt, new_positive_font), y_cursor), new_positive_txt, display.BLACK,
+              new_positive_font)
+    y_cursor += med_font.getsize(new_positive_txt)[1] + extra_y_spacer
+    rolling_positive_txt = f"Avg IA: {iowa_positive_average:,d} | US: {us_positive_average:,d}"
+    rolling_positive_font = ImageFont.truetype(FredokaOne, max_font_size(rolling_positive_txt, max_line_length))
+    draw.text((get_centered_x(rolling_positive_txt, rolling_positive_font), y_cursor), rolling_positive_txt,
+              display.BLACK, rolling_positive_font)
+    y_cursor = header_y + 2 * (InkyWHAT.HEIGHT - header_y) / 3 + 3  # reset cursor to beginning of col 1 row 2
+
+    ### positive test rate
+    # positive test rate title
+    draw.text((get_centered_x('Positive Test Rate', sml_font), y_cursor), 'Positive Test Rate', display.RED, sml_font)
+    y_cursor += sml_font.getsize('Positive Test Rate')[1] + 5
+
+    # positive test rate numbers
+    ptr_txt = f"IA: {100 * iowa['positiveTestRate'].iloc[0]:.1f}% | US: {100 * us['positiveTestRate'].iloc[0]:.1f}%"
+    ptr_font = ImageFont.truetype(FredokaOne, max_font_size(ptr_txt, max_line_length))
+    draw.text((get_centered_x(ptr_txt, ptr_font), y_cursor), ptr_txt, display.BLACK, ptr_font)
+    y_cursor += med_font.getsize(ptr_txt)[1] + extra_y_spacer
+    rolling_positive_txt = f"LW IA: {100 * iowa['positiveTestRate'].iloc[7]:.1f}% | " \
+                           f"US: {100 * us['positiveTestRate'].iloc[7]:.1f}%"
+    rolling_positive_font = ImageFont.truetype(FredokaOne, max_font_size(rolling_positive_txt, max_line_length))
+    draw.text((get_centered_x(rolling_positive_txt, rolling_positive_font), y_cursor), rolling_positive_txt,
+              display.BLACK, rolling_positive_font)
+
+    ### % dead
+    y_cursor = header_y + 3
+    draw.text((get_centered_x('US Percent Dead', sml_font, 'third'), y_cursor), 'US Percent Dead', display.RED, sml_font)
+    y_cursor += sml_font.getsize('US Percent Dead')[1] + 10
+    death_pct_text = f'{100 * us["death"].iloc[0] / us_pop:.2f}%'
+    death_pct_font = ImageFont.truetype(FredokaOne, max_font_size(death_pct_text, max_line_length))
+    draw.text((get_centered_x(death_pct_text, death_pct_font, 'third'), y_cursor), death_pct_text, display.BLACK, death_pct_font)
+    y_cursor = header_y + (InkyWHAT.HEIGHT - header_y) / 3 + 3  # reset cursor to beginning of col 1 row 3
+
+
+    ### new immunity
+    draw.text((get_centered_x('US Percent "Immune"', sml_font, 'third'), y_cursor), 'US Percent "Immune"', display.RED, sml_font)
+    y_cursor += sml_font.getsize('US Percent "Immune"')[1] + 10
+    immune_text = f'{100 * total_immune / us_pop:.2f}%'
+    immune_font = ImageFont.truetype(FredokaOne, max_font_size(immune_text, max_line_length))
+    draw.text((get_centered_x(immune_text, immune_font, 'third'), y_cursor), immune_text, display.BLACK, immune_font)
+    y_cursor = header_y + 2 * (InkyWHAT.HEIGHT - header_y) / 3 + 3  # reset cursor to beginning of col 1 row 3
+
+    ### num vaccinated
+    draw.text((get_centered_x('US People Vaccinated', sml_font, 'third'), y_cursor), 'US People Vaccinated', display.RED, sml_font)
+    y_cursor += sml_font.getsize('US People Vaccinated')[1] + 3
+    total_vacc_txt = f'Total: {int(total_vacc):,d}'
+    total_vacc_font = ImageFont.truetype(FredokaOne, max_font_size(total_vacc_txt, max_line_length, upper_lim=20))
+    draw.text((get_centered_x(total_vacc_txt, total_vacc_font, 'third'), y_cursor), total_vacc_txt, display.BLACK, total_vacc_font)
+    y_cursor += sml_font.getsize('Vaccination')[1] + 10
+
+    # vacc per hundred
+    vacc_per_hundred_txt = f'# per 100: {vacc_per_hundred:.2f}'
+    vacc_per_hundred_font = ImageFont.truetype(FredokaOne, max_font_size(vacc_per_hundred_txt, max_line_length, upper_lim=20))
+    draw.text((get_centered_x(vacc_per_hundred_txt, vacc_per_hundred_font, 'third'), y_cursor), vacc_per_hundred_txt,
+              display.BLACK, vacc_per_hundred_font)
+
+    # update display
+    display.set_image(img)
+    print('Updating display')
+    display.show()
+    print('Display updated')
+
+
+def get_infection_history(link: str) -> pd.DataFrame:
+    df = pd.read_csv(link)
+    df['date'] = pd.to_datetime(df['date'], format="%Y%m%d")
+    df['positiveTestRate'] = df['positiveIncrease'] / (df['positiveIncrease'] + df['negativeIncrease'])
+    df['deathRollingSeven'] = df.sort_values('date')['deathIncrease'].rolling(7).mean()
+    df['positiveRollingSeven'] = df.sort_values('date')['positiveIncrease'].rolling(7).mean()
+    df['positiveTestRate'] = df['positiveIncrease'] / (df['positiveIncrease'] + df['negativeIncrease'])
+    df['ptrRollingSeven'] = df.sort_values('date')['positiveTestRate'].rolling(7).mean()
+    return df
+
+
+def get_number_vaccinations(link: str):
+    df = pd.read_csv(link)
+    df = df[df['location'] == 'United States']
+    df = df.sort_values(by='date', ascending=False)
+    df = df.fillna(method='backfill')
+    return df['total_vaccinations'].iloc[0], df['total_vaccinations_per_hundred'].iloc[0]
+
+
+def get_centered_x(text, font, first_or_third='first'):
+    middle = 400 / 2
+    first_quarter = middle / 2
+    third_quarter = 3 * first_quarter
+    if first_or_third == 'first':
+        return first_quarter - (font.getsize(text)[0] / 2)
+    else:
+        return third_quarter - (font.getsize(text)[0] / 2)
+
+
+def max_font_size(text, max_length=190, lower_lim: int = 12, upper_lim: int = 36):
+    font_size = upper_lim
+    font = ImageFont.truetype(FredokaOne, font_size)
+    txt_len = font.getsize(text)[0]
+    while (txt_len > max_length) and (font_size > lower_lim):
+        font_size -= 1
+        font = ImageFont.truetype(FredokaOne, font_size)
+        txt_len = font.getsize(text)[0]
+    return font_size
+
+
+if __name__ == '__main__':
+    while True:
+        print('Starting loop')
+        main()
+
+        dt = datetime.now() + timedelta(hours=5, minutes=59)  # allow a minute for script to run
+
+        while datetime.now() < dt:
+            sleep(1)

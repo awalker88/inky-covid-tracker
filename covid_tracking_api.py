@@ -5,20 +5,26 @@ from time import sleep
 from PIL import Image, ImageFont, ImageDraw
 from font_fredoka_one import FredokaOne
 from inky import InkyWHAT
+from bs4 import BeautifulSoup
+import requests
+
+us_pop = 330_746_845
 
 
 def main():
     first_day = pd.to_datetime('2020-1-20')  # first case in US
 
     iowa_pop = 3_182_025
-    us_pop = 330_746_845
     print('Pulling infection histories')
     iowa = get_infection_history("https://api.covidtracking.com/v1/states/ia/daily.csv")
     us = get_infection_history("https://api.covidtracking.com/v1/us/daily.csv")
     print('Received infection histories')
 
     print('Pulling infection histories')
-    total_vacc, vacc_per_hundred = get_number_vaccinations("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/owid-covid-data.csv")
+    us_vacc, iowa_vacc = get_number_vaccinations("https://www.nytimes.com/interactive/2020/us/covid-19-vaccine-doses.html")
+    us_vacc_per_100 = 100 * us_vacc / us_pop
+    iowa_vacc_per_100 = 100 * iowa_vacc / iowa_pop
+
     print('Received vaccination histories')
 
     latest_date = iowa['date'][0]
@@ -27,7 +33,7 @@ def main():
     us_death_average = int(us['deathRollingSeven'].iloc[0])
     iowa_positive_average = int(iowa['positiveRollingSeven'].iloc[0])
     us_positive_average = int(us['positiveRollingSeven'].iloc[0])
-    total_immune = us['positive'].iloc[0] + total_vacc
+    total_immune = us['positive'].iloc[0] + us_vacc
 
     # Set Inky Display stuff
     print('Initializing inky display')
@@ -115,15 +121,15 @@ def main():
     y_cursor = header_y + 2 * (InkyWHAT.HEIGHT - header_y) / 3 + 3  # reset cursor to beginning of col 1 row 3
 
     # num vaccinated
-    draw.text((get_centered_x('US People Vaccinated', sml_font, 'third'), y_cursor), 'US People Vaccinated', display.RED, sml_font)
-    y_cursor += sml_font.getsize('US People Vaccinated')[1] + 3
-    total_vacc_txt = f'Total: {int(total_vacc):,d}'
+    draw.text((get_centered_x('People Vaccinated', sml_font, 'third'), y_cursor), 'People Vaccinated', display.RED, sml_font)
+    y_cursor += sml_font.getsize('People Vaccinated')[1] + 3
+    total_vacc_txt = f'US: {int(us_vacc):,d}'
     total_vacc_font = ImageFont.truetype(FredokaOne, max_font_size(total_vacc_txt, max_line_length, upper_lim=20))
     draw.text((get_centered_x(total_vacc_txt, total_vacc_font, 'third'), y_cursor), total_vacc_txt, display.BLACK, total_vacc_font)
     y_cursor += sml_font.getsize('Vaccination')[1] + 10
 
     # vacc per hundred
-    vacc_per_hundred_txt = f'# per 100: {vacc_per_hundred:.2f}'
+    vacc_per_hundred_txt = f'IA: {iowa_vacc_per_100:.2f} | US: {us_vacc_per_100:.2f}'
     vacc_per_hundred_font = ImageFont.truetype(FredokaOne, max_font_size(vacc_per_hundred_txt, max_line_length, upper_lim=20))
     draw.text((get_centered_x(vacc_per_hundred_txt, vacc_per_hundred_font, 'third'), y_cursor), vacc_per_hundred_txt,
               display.BLACK, vacc_per_hundred_font)
@@ -149,14 +155,22 @@ def get_infection_history(link: str) -> pd.DataFrame:
     return df
 
 
-def get_number_vaccinations(link: str):
+def get_number_vaccinations(link: str, state_name:str = 'Iowa'):
     try:
-        df = pd.read_csv(link)
+        page = requests.get(link)
     except HTTPError:
         raise ConnectionError(f'Error when pulling vaccination data with {link}')
-    df = df.sort_values(by='date', ascending=False)
-    df = df.fillna(method='backfill')
-    return df['total_vaccinations'].iloc[0], df['total_vaccinations_per_hundred'].iloc[0]
+
+    soup = BeautifulSoup(page.content, 'html.parser')
+    us_vacc = int(soup.find("td", class_="g-cell g-align-r distributed").text.strip("\n").replace(",", ""))
+
+    states = soup.find_all("tbody", class_="g-row-group g-row-group-hidden")
+    selected_state = None
+    for state in states:
+        if state.attrs['data-name_display'] == 'Iowa':
+            selected_state = state
+
+    return us_vacc, selected_state.attrs['data-doses_administered']
 
 
 def get_centered_x(text, font, first_or_third='first'):

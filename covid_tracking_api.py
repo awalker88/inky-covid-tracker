@@ -9,19 +9,19 @@ from bs4 import BeautifulSoup
 import requests
 
 us_pop = 330_746_845
+iowa_pop = 3_182_025
 
 
 def main():
     first_day = pd.to_datetime('2020-1-20')  # first case in US
 
-    iowa_pop = 3_182_025
     print('Pulling infection histories')
     iowa = get_infection_history("https://api.covidtracking.com/v1/states/ia/daily.csv")
     us = get_infection_history("https://api.covidtracking.com/v1/us/daily.csv")
     print('Received infection histories')
 
-    print('Pulling infection histories')
-    us_vacc, iowa_vacc = get_number_vaccinations("https://www.nytimes.com/interactive/2020/us/covid-19-vaccine-doses.html")
+    print('Pulling vaccination histories')
+    us_vacc, iowa_vacc, us_immune = get_number_vaccinations("https://www.nytimes.com/interactive/2020/us/covid-19-vaccine-doses.html")
     us_vacc_per_100 = 100 * us_vacc / us_pop
     iowa_vacc_per_100 = 100 * iowa_vacc / iowa_pop
 
@@ -33,7 +33,10 @@ def main():
     us_death_average = int(us['deathRollingSeven'].iloc[0])
     iowa_positive_average = int(iowa['positiveRollingSeven'].iloc[0])
     us_positive_average = int(us['positiveRollingSeven'].iloc[0])
-    total_immune = us['positive'].iloc[0] + us_vacc
+
+    # "Immune" is a little iffy here. i assume if someone had covid they are immune. i also assume that if a person
+    # received one shot they are 80% immune, and 95% with two
+    us_immune += us['positive'].iloc[0]
 
     # Set Inky Display stuff
     print('Initializing inky display')
@@ -107,7 +110,7 @@ def main():
     y_cursor = header_y + 3
     draw.text((get_centered_x('US Percent Dead', sml_font, 'third'), y_cursor), 'US Percent Dead', display.RED, sml_font)
     y_cursor += sml_font.getsize('US Percent Dead')[1] + 10
-    death_pct_text = f'{100 * us["death"].iloc[0] / us_pop:.2f}%'
+    death_pct_text = f'{100 * us["death"].iloc[0] / us_pop:.4f}%'
     death_pct_font = ImageFont.truetype(FredokaOne, max_font_size(death_pct_text, max_line_length))
     draw.text((get_centered_x(death_pct_text, death_pct_font, 'third'), y_cursor), death_pct_text, display.BLACK, death_pct_font)
     y_cursor = header_y + (InkyWHAT.HEIGHT - header_y) / 3 + 3  # reset cursor to beginning of col 1 row 3
@@ -115,7 +118,7 @@ def main():
     # immunity
     draw.text((get_centered_x('US Percent "Immune"', sml_font, 'third'), y_cursor), 'US Percent "Immune"', display.RED, sml_font)
     y_cursor += sml_font.getsize('US Percent "Immune"')[1] + 10
-    immune_text = f'{100 * (total_immune - us["death"].iloc[0]) / us_pop:.2f}%'  # have to subtract dead from immune :(
+    immune_text = f'{100 * (us_immune - us["death"].iloc[0]) / us_pop:.2f}%'  # have to subtract dead from immune :(
     immune_font = ImageFont.truetype(FredokaOne, max_font_size(immune_text, max_line_length))
     draw.text((get_centered_x(immune_text, immune_font, 'third'), y_cursor), immune_text, display.BLACK, immune_font)
     y_cursor = header_y + 2 * (InkyWHAT.HEIGHT - header_y) / 3 + 3  # reset cursor to beginning of col 1 row 3
@@ -129,7 +132,7 @@ def main():
     y_cursor += sml_font.getsize('Vaccination')[1] + 10
 
     # vacc per hundred
-    vacc_per_hundred_txt = f'IA: {iowa_vacc_per_100:.2f} | US: {us_vacc_per_100:.2f}'
+    vacc_per_hundred_txt = f'IA: {iowa_vacc_per_100:.1f}% | US: {us_vacc_per_100:.1f}%'
     vacc_per_hundred_font = ImageFont.truetype(FredokaOne, max_font_size(vacc_per_hundred_txt, max_line_length, upper_lim=20))
     draw.text((get_centered_x(vacc_per_hundred_txt, vacc_per_hundred_font, 'third'), y_cursor), vacc_per_hundred_txt,
               display.BLACK, vacc_per_hundred_font)
@@ -152,25 +155,32 @@ def get_infection_history(link: str) -> pd.DataFrame:
     df['positiveRollingSeven'] = df.sort_values('date')['positiveIncrease'].rolling(7).mean()
     df['positiveTestRate'] = df['positiveIncrease'] / (df['positiveIncrease'] + df['negativeIncrease'])
     df['ptrRollingSeven'] = df.sort_values('date')['positiveTestRate'].rolling(7).mean()
+
     return df
 
 
-def get_number_vaccinations(link: str, state_name:str = 'Iowa'):
+def get_number_vaccinations(link: str, state_name: str = 'Iowa'):
     try:
         page = requests.get(link)
+        soup = BeautifulSoup(page.content, 'html.parser')
+        us_jabs = int(soup.find("td", class_="g-cell g-align-r given g-hide-mobile").text.strip("\n").replace(",", ""))
+        # get number of jabs that have been second doses
+        us_two_jabs = int(us_pop * float(soup.find("td", class_="g-cell g-align-r g-sm g-border-r").text.strip("\n").replace("%", "")) / 100)
+        # some research has shown that a single dose is ~80% effective, while two is 95%
+        us_immune = (us_jabs - us_two_jabs) * .8 + us_two_jabs * .95
+
+        states = soup.find_all("tbody", class_="g-row-group g-row-group-hidden")
+        selected_state = None
+        for state in states:
+            if state.attrs['data-name_display'] == state_name:
+                selected_state = state
+        state_vacc = int(selected_state.attrs['data-doses_administered']) - iowa_pop * float(selected_state.attrs['data-second_doses_administered_pct_of_pop'])
+
     except HTTPError:
-        raise ConnectionError(f'Error when pulling vaccination data with {link}')
+        print(ConnectionError(f'Error when pulling vaccination data with {link}'))
+        us_jabs, state_vacc, us_immune = 0, 0, 0
 
-    soup = BeautifulSoup(page.content, 'html.parser')
-    us_vacc = int(soup.find("td", class_="g-cell g-align-r distributed").text.strip("\n").replace(",", ""))
-
-    states = soup.find_all("tbody", class_="g-row-group g-row-group-hidden")
-    selected_state = None
-    for state in states:
-        if state.attrs['data-name_display'] == 'Iowa':
-            selected_state = state
-
-    return us_vacc, selected_state.attrs['data-doses_administered']
+    return us_jabs, state_vacc, us_immune
 
 
 def get_centered_x(text, font, first_or_third='first'):
@@ -199,7 +209,7 @@ if __name__ == '__main__':
         print('Starting loop')
         main()
 
-        dt = datetime.now() + timedelta(hours=5, minutes=59)  # allow a minute for script to run
+        dt = datetime.now() + timedelta(hours=2, minutes=59)  # allow a minute for script to run
 
         while datetime.now() < dt:
             sleep(1)

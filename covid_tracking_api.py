@@ -21,6 +21,8 @@ def main():
     print('Received infection histories')
 
     print('Pulling vaccination histories')
+    # "Immune" is a little iffy here. i assume if someone had covid they are immune. i also assume that if a person
+    # received one shot they are 80% immune, and 95% with two
     us_vacc, iowa_vacc, us_immune = get_number_vaccinations("https://www.nytimes.com/interactive/2020/us/covid-19-vaccine-doses.html")
     us_vacc_per_100 = 100 * us_vacc / us_pop
     iowa_vacc_per_100 = 100 * iowa_vacc / iowa_pop
@@ -34,9 +36,9 @@ def main():
     iowa_positive_average = int(iowa['positiveRollingSeven'].iloc[0])
     us_positive_average = int(us['positiveRollingSeven'].iloc[0])
 
-    # "Immune" is a little iffy here. i assume if someone had covid they are immune. i also assume that if a person
-    # received one shot they are 80% immune, and 95% with two
-    us_immune += us['positive'].iloc[0]
+    # CDC estimates that about 1 in 4 cases of COVID have been caught by tests
+    # https://www.cdc.gov/coronavirus/2019-ncov/cases-updates/burden.html
+    us_immune += us['positive'].iloc[0] * 4
 
     # Set Inky Display stuff
     print('Initializing inky display')
@@ -163,21 +165,22 @@ def get_number_vaccinations(link: str, state_name: str = 'Iowa'):
     try:
         page = requests.get(link)
         soup = BeautifulSoup(page.content, 'html.parser')
-        us_jabs = int(soup.find("td", class_="g-cell g-align-r given g-hide-mobile").text.strip("\n").replace(",", ""))
+        us_jabs = int(soup.find("td", class_="g-cell g-col g-align-r given g-hide-mobile").text.strip("\n").replace(",", ""))
         # get number of jabs that have been second doses
-        us_two_jabs = int(us_pop * float(soup.find("td", class_="g-cell g-align-r g-sm g-border-r").text.strip("\n").replace("%", "")) / 100)
+        us_two_jabs = int(us_pop * float(soup.find("td", class_="g-cell g-col g-align-r g-sm g-border-r").text.strip("\n").replace("%", "")) / 100)
         # some research has shown that a single dose is ~80% effective, while two is 95%
         us_immune = (us_jabs - us_two_jabs) * .8 + us_two_jabs * .95
-
+        us_jabs -= us_two_jabs
         states = soup.find_all("tbody", class_="g-row-group g-row-group-hidden")
         selected_state = None
         for state in states:
             if state.attrs['data-name_display'] == state_name:
                 selected_state = state
-        state_vacc = int(selected_state.attrs['data-doses_administered']) - iowa_pop * float(selected_state.attrs['data-second_doses_administered_pct_of_pop'])
+        state_vacc = int(selected_state.attrs['data-doses_administered']) - iowa_pop * float(selected_state.attrs['data-second_doses_administered_pct_of_pop']) / 100
 
-    except HTTPError:
-        print(ConnectionError(f'Error when pulling vaccination data with {link}'))
+    except Exception as e:
+        print(f'Error when pulling vaccination data with {link}')
+        print(e)
         us_jabs, state_vacc, us_immune = 0, 0, 0
 
     return us_jabs, state_vacc, us_immune

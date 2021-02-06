@@ -118,9 +118,9 @@ def main():
     y_cursor = header_y + (InkyWHAT.HEIGHT - header_y) / 3 + 3  # reset cursor to beginning of col 1 row 3
 
     # immunity
-    draw.text((get_centered_x('US Percent "Immune"', sml_font, 'third'), y_cursor), 'US Percent "Immune"', display.RED, sml_font)
-    y_cursor += sml_font.getsize('US Percent "Immune"')[1] + 10
-    immune_text = f'{100 * (us_immune - us["death"].iloc[0]) / us_pop:.2f}%'  # have to subtract dead from immune :(
+    draw.text((get_centered_x('US Percent Vaccinated', sml_font, 'third'), y_cursor), 'US Percent Vaccinated', display.RED, sml_font)
+    y_cursor += sml_font.getsize('US Percent Vaccinated')[1] + 10
+    immune_text = f'{100 * us_vacc / us_pop:.2f}%'  # have to subtract dead from immune :(
     immune_font = ImageFont.truetype(FredokaOne, max_font_size(immune_text, max_line_length))
     draw.text((get_centered_x(immune_text, immune_font, 'third'), y_cursor), immune_text, display.BLACK, immune_font)
     y_cursor = header_y + 2 * (InkyWHAT.HEIGHT - header_y) / 3 + 3  # reset cursor to beginning of col 1 row 3

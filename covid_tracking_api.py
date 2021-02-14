@@ -134,7 +134,7 @@ def main():
     y_cursor += sml_font.getsize('Vaccination')[1] + 10
 
     # vacc per hundred
-    vacc_per_hundred_txt = f'IA: {iowa_vacc_per_100:.1f}% | US: {us_vacc_per_100:.1f}%'
+    vacc_per_hundred_txt = f'IA: {iowa_vacc_per_100:.1f}% | {iowa_vacc / 1_000_000:.3f}M'
     vacc_per_hundred_font = ImageFont.truetype(FredokaOne, max_font_size(vacc_per_hundred_txt, max_line_length, upper_lim=20))
     draw.text((get_centered_x(vacc_per_hundred_txt, vacc_per_hundred_font, 'third'), y_cursor), vacc_per_hundred_txt,
               display.BLACK, vacc_per_hundred_font)
